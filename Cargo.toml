@@ -2,6 +2,7 @@
 name = "get-up"
 version = "0.1.0"
 edition = "2021"
+license-file = "LICENSE"
 description = "HTTP GET&HEAD service for bytes::Buf object"
 
 [dependencies]
