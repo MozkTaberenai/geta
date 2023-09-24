@@ -6,6 +6,12 @@ pub enum Encoding {
     Deflate,
 }
 
+impl std::fmt::Display for Encoding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 impl Encoding {
     pub fn as_bytes(&self) -> &'static [u8] {
         self.as_str().as_bytes()

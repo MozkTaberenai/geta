@@ -5,6 +5,7 @@ use http::{HeaderMap, HeaderValue, Method, Request, Response};
 use std::io::Read;
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
+use tracing::{info, warn};
 
 #[derive(Debug)]
 pub struct Service<T> {
@@ -86,89 +87,36 @@ where
                 }
 
                 if body.has_remaining() {
-                    if let Some(accept_encoding) = req.headers().get(ACCEPT_ENCODING) {
-                        match self.encoding {
-                            Encoding::Identity => {
-                                tracing::info!("serving encoding: identity ({})", body.remaining());
-                                res.body(Body::Buf {
-                                    inner: Some(body.clone()),
-                                })
-                                .unwrap()
-                            }
+                    let bytes = body.remaining();
+                    let encoding = self.encoding;
 
-                            Encoding::Br => {
-                                if self.encoding.is_contained_in(accept_encoding) {
-                                    tracing::info!("serving encoding: br ({})", body.remaining());
-                                    res.body(Body::Buf {
-                                        inner: Some(body.clone()),
-                                    })
-                                    .unwrap()
-                                } else {
-                                    res.headers_mut().unwrap().remove(CONTENT_ENCODING);
-                                    res.body(Body::from(spawn_br_decoder(body.clone())))
-                                        .unwrap()
-                                }
+                    let body = if let Some(accept_encoding) = req.headers().get(ACCEPT_ENCODING) {
+                        if encoding == Encoding::Identity
+                            || encoding.is_contained_in(accept_encoding)
+                        {
+                            info!(%encoding, %bytes, "serving body");
+                            Body::Buf {
+                                inner: Some(body.clone()),
                             }
-
-                            Encoding::Gzip => {
-                                if self.encoding.is_contained_in(accept_encoding) {
-                                    tracing::info!("serving encoding: gzip ({})", body.remaining());
-                                    res.body(Body::Buf {
-                                        inner: Some(body.clone()),
-                                    })
-                                    .unwrap()
-                                } else {
-                                    res.headers_mut().unwrap().remove(CONTENT_ENCODING);
-                                    res.body(Body::from(spawn_gzip_decoder(body.clone())))
-                                        .unwrap()
-                                }
-                            }
-                            Encoding::Deflate => {
-                                if self.encoding.is_contained_in(accept_encoding) {
-                                    tracing::info!(
-                                        "serving encoding: deflate ({})",
-                                        body.remaining()
-                                    );
-                                    res.body(Body::Buf {
-                                        inner: Some(body.clone()),
-                                    })
-                                    .unwrap()
-                                } else {
-                                    res.headers_mut().unwrap().remove(CONTENT_ENCODING);
-                                    res.body(Body::from(spawn_deflate_decoder(body.clone())))
-                                        .unwrap()
-                                }
-                            }
+                        } else {
+                            res.headers_mut().unwrap().remove(CONTENT_ENCODING);
+                            let decoder = match encoding {
+                                Encoding::Br => spawn_br_decoder::<T>,
+                                Encoding::Gzip => spawn_gzip_decoder::<T>,
+                                Encoding::Deflate => spawn_deflate_decoder::<T>,
+                                Encoding::Identity => unreachable!(),
+                            };
+                            warn!(%encoding, "decoder task is spawned");
+                            Body::from(decoder(body.clone()))
                         }
                     } else {
-                        match self.encoding {
-                            Encoding::Identity => {
-                                tracing::info!("serving encoding: identity ({})", body.remaining());
-                            }
-                            Encoding::Br => {
-                                tracing::info!("serving encoding: br ({})", body.remaining());
-                                // res.headers_mut().unwrap().remove(CONTENT_ENCODING);
-                                // res.body(Body::from(spawn_br_decoder(body.clone())))
-                                //     .unwrap()
-                            }
-                            Encoding::Gzip => {
-                                tracing::info!("serving encoding: gzip ({})", body.remaining());
-                                // res.headers_mut().unwrap().remove(CONTENT_ENCODING);
-                                // res.body(Body::from(spawn_gzip_decoder(body.clone())))
-                                //     .unwrap()
-                            }
-                            Encoding::Deflate => {
-                                tracing::info!("serving encoding: deflate ({})", body.remaining());
-                                // res.headers_mut().unwrap().remove(CONTENT_ENCODING);
-                                // res.body(Body::from(spawn_deflate_decoder(body.clone())))
-                                //     .unwrap()
-                            }
-                        }
-                        res.body(Body::Buf {
+                        info!(%encoding, %bytes, "serving body");
+                        Body::Buf {
                             inner: Some(body.clone()),
-                        })
-                        .unwrap()
-                    }
+                        }
+                    };
+
+                    res.body(body).unwrap()
                 } else {
                     res.headers_mut().unwrap().remove(CONTENT_ENCODING);
                     res.body(Body::Empty).unwrap()
@@ -199,8 +147,8 @@ fn method_not_allowed<T: Buf>() -> Response<Body<T>> {
         .unwrap()
 }
 
-fn spawn_br_decoder<T: Buf + Clone + Send + 'static>(body: T) -> mpsc::Receiver<Bytes> {
-    tracing::warn!("br decoder task is spawned");
+fn spawn_br_decoder<T: Buf + Send + 'static>(body: T) -> mpsc::Receiver<Bytes> {
+    warn!("br decoder task is spawned");
 
     let (tx, rx) = mpsc::channel(1);
 
@@ -220,8 +168,8 @@ fn spawn_br_decoder<T: Buf + Clone + Send + 'static>(body: T) -> mpsc::Receiver<
     rx
 }
 
-fn spawn_gzip_decoder<T: Buf + Clone + Send + 'static>(body: T) -> mpsc::Receiver<Bytes> {
-    tracing::warn!("gzip decoder task is spawned");
+fn spawn_gzip_decoder<T: Buf + Send + 'static>(body: T) -> mpsc::Receiver<Bytes> {
+    warn!("gzip decoder task is spawned");
 
     let (tx, rx) = mpsc::channel(1);
 
@@ -241,8 +189,8 @@ fn spawn_gzip_decoder<T: Buf + Clone + Send + 'static>(body: T) -> mpsc::Receive
     rx
 }
 
-fn spawn_deflate_decoder<T: Buf + Clone + Send + 'static>(body: T) -> mpsc::Receiver<Bytes> {
-    tracing::warn!("deflate decoder task is spawned");
+fn spawn_deflate_decoder<T: Buf + Send + 'static>(body: T) -> mpsc::Receiver<Bytes> {
+    warn!("deflate decoder task is spawned");
 
     let (tx, rx) = mpsc::channel(1);
 
