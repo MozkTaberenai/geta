@@ -148,8 +148,6 @@ fn method_not_allowed<T: Buf>() -> Response<Body<T>> {
 }
 
 fn spawn_br_decoder<T: Buf + Send + 'static>(body: T) -> mpsc::Receiver<Bytes> {
-    warn!("br decoder task is spawned");
-
     let (tx, rx) = mpsc::channel(1);
 
     tokio::task::spawn_blocking(move || {
@@ -169,8 +167,6 @@ fn spawn_br_decoder<T: Buf + Send + 'static>(body: T) -> mpsc::Receiver<Bytes> {
 }
 
 fn spawn_gzip_decoder<T: Buf + Send + 'static>(body: T) -> mpsc::Receiver<Bytes> {
-    warn!("gzip decoder task is spawned");
-
     let (tx, rx) = mpsc::channel(1);
 
     tokio::task::spawn_blocking(move || {
@@ -190,8 +186,6 @@ fn spawn_gzip_decoder<T: Buf + Send + 'static>(body: T) -> mpsc::Receiver<Bytes>
 }
 
 fn spawn_deflate_decoder<T: Buf + Send + 'static>(body: T) -> mpsc::Receiver<Bytes> {
-    warn!("deflate decoder task is spawned");
-
     let (tx, rx) = mpsc::channel(1);
 
     tokio::task::spawn_blocking(move || {
