@@ -7,7 +7,7 @@ description = "HTTP GET&HEAD service for bytes::Buf object"
 
 [dependencies]
 bytes = "1.5.0"
-ring = "0.16.20"
+ring = "0.17.0"
 brotli-decompressor = "2.3.4"
 flate2 = "1.0.27"
 # zstd = "0.12.4"
