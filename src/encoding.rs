@@ -26,7 +26,7 @@ impl Encoding {
         }
     }
 
-    pub fn is_contained_in(self, target: impl AsRef<[u8]>) -> bool {
+    pub fn is_contained_in(&self, target: impl AsRef<[u8]>) -> bool {
         let pat = self.as_bytes();
         target
             .as_ref()

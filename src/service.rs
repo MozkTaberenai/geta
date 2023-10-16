@@ -2,8 +2,7 @@ use crate::{Body, ETag, Encoding};
 use bytes::{Buf, Bytes, BytesMut};
 use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, ETAG, IF_NONE_MATCH};
 use http::{HeaderMap, HeaderValue, Method, Request, Response};
-use std::io::Read;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -11,11 +10,11 @@ use tracing::{info, warn};
 pub struct Service<T> {
     pub headers: HeaderMap,
     encoding: Encoding,
-    buf: RwLock<Arc<Inner<T>>>,
+    payload: RwLock<Payload<T>>,
 }
 
 #[derive(Debug)]
-enum Inner<T> {
+enum Payload<T> {
     Empty,
     Filled { etag: ETag, body: T },
 }
@@ -25,7 +24,7 @@ impl<T> Default for Service<T> {
         Self {
             headers: HeaderMap::new(),
             encoding: Encoding::Identity,
-            buf: RwLock::new(Arc::new(Inner::Empty)),
+            payload: RwLock::new(Payload::Empty),
         }
     }
 }
@@ -48,80 +47,77 @@ where
 
     pub fn fill(&self, body: T) {
         let etag = if body.has_remaining() {
-            ETag::from(body.clone())
+            ETag::from_buf(body.clone())
         } else {
             ETag::empty()
         };
-        *self.buf.write().unwrap() = Arc::new(Inner::Filled { etag, body });
+        *self.payload.write().unwrap() = Payload::Filled { etag, body };
     }
 
     pub async fn call<B>(&self, req: Request<B>) -> Response<Body<T>> {
         let head = match *req.method() {
-            Method::GET => false,
             Method::HEAD => true,
+            Method::GET => false,
             _ => {
                 return method_not_allowed();
             }
         };
 
-        let buf = self.buf.read().unwrap().clone();
+        let (etag, body) = {
+            let buf = self.payload.read().unwrap();
 
-        match buf.as_ref() {
-            Inner::Empty => no_content(),
-            Inner::Filled { etag, body } => {
-                if let Some(if_none_match) = req.headers().get(IF_NONE_MATCH) {
-                    if etag.matches(if_none_match.as_bytes()) {
-                        return not_modified();
-                    }
-                }
+            let Payload::Filled { ref etag, ref body } = *buf else {
+                return no_content();
+            };
 
-                let mut res = Response::builder().status(http::StatusCode::OK);
+            (etag.clone(), body.clone())
+        };
 
-                for (k, v) in &self.headers {
-                    res = res.header(k.clone(), v.clone());
-                }
-                res = res.header(ETAG, etag.as_ref());
+        if let Some(if_none_match) = req.headers().get(IF_NONE_MATCH) {
+            if etag.matches(if_none_match.as_bytes()) {
+                return not_modified();
+            }
+        }
 
-                if head {
-                    return res.body(Body::Empty).unwrap();
-                }
+        let mut res = Response::builder().status(http::StatusCode::OK);
 
-                if body.has_remaining() {
-                    let bytes = body.remaining();
-                    let encoding = self.encoding;
+        for (k, v) in &self.headers {
+            res = res.header(k.clone(), v.clone());
+        }
+        res = res.header(ETAG, etag.0);
 
-                    let body = if let Some(accept_encoding) = req.headers().get(ACCEPT_ENCODING) {
-                        if encoding == Encoding::Identity
-                            || encoding.is_contained_in(accept_encoding)
-                        {
-                            info!(%encoding, %bytes, "serving body");
-                            Body::Buf {
-                                inner: Some(body.clone()),
-                            }
-                        } else {
-                            res.headers_mut().unwrap().remove(CONTENT_ENCODING);
-                            let decoder = match encoding {
-                                Encoding::Br => spawn_br_decoder::<T>,
-                                Encoding::Gzip => spawn_gzip_decoder::<T>,
-                                Encoding::Deflate => spawn_deflate_decoder::<T>,
-                                Encoding::Identity => unreachable!(),
-                            };
-                            warn!(%encoding, "decoder task is spawned");
-                            Body::from(decoder(body.clone()))
-                        }
-                    } else {
-                        info!(%encoding, %bytes, "serving body");
-                        Body::Buf {
-                            inner: Some(body.clone()),
-                        }
-                    };
+        if head {
+            return res.body(Body::Empty).unwrap();
+        }
 
-                    res.body(body).unwrap()
+        if body.has_remaining() {
+            let bytes = body.remaining();
+            let encoding = self.encoding;
+
+            let body = if let Some(accept_encoding) = req.headers().get(ACCEPT_ENCODING) {
+                if encoding == Encoding::Identity || encoding.is_contained_in(accept_encoding) {
+                    info!(%encoding, %bytes, "serving body");
+                    Body::Buf { inner: Some(body) }
                 } else {
                     res.headers_mut().unwrap().remove(CONTENT_ENCODING);
-                    res.body(Body::Empty).unwrap()
+                    let spawn_decoder = match encoding {
+                        Encoding::Br => spawn_br_decoder,
+                        Encoding::Gzip => spawn_gzip_decoder,
+                        Encoding::Deflate => spawn_deflate_decoder,
+                        Encoding::Identity => unreachable!(),
+                    };
+                    warn!(%encoding, "decoder task is spawned");
+                    Body::from(spawn_decoder(body))
                 }
-            }
+            } else {
+                info!(%encoding, %bytes, "serving body");
+                Body::Buf { inner: Some(body) }
+            };
+
+            res.body(body).unwrap()
+        } else {
+            res.headers_mut().unwrap().remove(CONTENT_ENCODING);
+            res.body(Body::Empty).unwrap()
         }
     }
 }
@@ -147,58 +143,29 @@ fn method_not_allowed<T: Buf>() -> Response<Body<T>> {
         .unwrap()
 }
 
-fn spawn_br_decoder<T: Buf + Send + 'static>(body: T) -> mpsc::Receiver<Bytes> {
-    let (tx, rx) = mpsc::channel(1);
-
-    tokio::task::spawn_blocking(move || {
-        let mut dec = brotli_decompressor::Decompressor::new(body.reader(), 512);
-        loop {
-            let mut buf = BytesMut::zeroed(512);
-            let n = dec.read(buf.as_mut()).expect("fail to read");
-            if n == 0 {
-                break;
-            }
-            tx.blocking_send(buf.split_to(n).freeze())
-                .expect("fail to blocking_send");
-        }
-    });
-
-    rx
+fn spawn_br_decoder(body: impl Buf + Send + 'static) -> mpsc::Receiver<Bytes> {
+    spawn_decoder(brotli_decompressor::Decompressor::new(body.reader(), 512))
 }
 
-fn spawn_gzip_decoder<T: Buf + Send + 'static>(body: T) -> mpsc::Receiver<Bytes> {
-    let (tx, rx) = mpsc::channel(1);
-
-    tokio::task::spawn_blocking(move || {
-        let mut dec = flate2::read::GzDecoder::new(body.reader());
-        loop {
-            let mut buf = BytesMut::zeroed(512);
-            let n = dec.read(buf.as_mut()).expect("fail to read");
-            if n == 0 {
-                break;
-            }
-            tx.blocking_send(buf.split_to(n).freeze())
-                .expect("fail to blocking_send");
-        }
-    });
-
-    rx
+fn spawn_gzip_decoder(body: impl Buf + Send + 'static) -> mpsc::Receiver<Bytes> {
+    spawn_decoder(flate2::read::GzDecoder::new(body.reader()))
 }
 
-fn spawn_deflate_decoder<T: Buf + Send + 'static>(body: T) -> mpsc::Receiver<Bytes> {
+fn spawn_deflate_decoder(body: impl Buf + Send + 'static) -> mpsc::Receiver<Bytes> {
+    spawn_decoder(flate2::read::DeflateDecoder::new(body.reader()))
+}
+
+fn spawn_decoder(mut read_decoder: impl std::io::Read + Send + 'static) -> mpsc::Receiver<Bytes> {
     let (tx, rx) = mpsc::channel(1);
 
-    tokio::task::spawn_blocking(move || {
-        let mut dec = flate2::read::DeflateDecoder::new(body.reader());
-        loop {
-            let mut buf = BytesMut::zeroed(512);
-            let n = dec.read(buf.as_mut()).expect("fail to read");
-            if n == 0 {
-                break;
-            }
-            tx.blocking_send(buf.split_to(n).freeze())
-                .expect("fail to blocking_send");
+    tokio::task::spawn_blocking(move || loop {
+        let mut buf = BytesMut::zeroed(512);
+        let n = read_decoder.read(buf.as_mut()).expect("fail to read");
+        if n == 0 {
+            break;
         }
+        tx.blocking_send(buf.split_to(n).freeze())
+            .expect("fail to blocking_send");
     });
 
     rx

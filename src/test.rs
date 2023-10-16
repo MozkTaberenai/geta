@@ -18,7 +18,7 @@ fn test_body() -> Bytes {
 #[tokio::test]
 async fn get() {
     let orig_body = test_body();
-    let orig_etag = ETag::from(&orig_body[..]);
+    let orig_etag = ETag::from_buf(&orig_body[..]);
     let content_type = HeaderValue::from_static("text/plain");
 
     let mut bufd = Service::new();
@@ -46,14 +46,8 @@ async fn get() {
         let res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
-        assert_eq!(
-            res.headers().get(CONTENT_TYPE).unwrap().as_bytes(),
-            b"text/plain"
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
+        assert_eq!(res.headers().get(CONTENT_TYPE).unwrap(), "text/plain");
     }
 
     // GET request
@@ -63,10 +57,7 @@ async fn get() {
         let mut res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
         assert_eq!(
             res.body_mut().collect().await.unwrap().to_bytes(),
             orig_body
@@ -84,7 +75,7 @@ async fn br() {
         Bytes::from(encoder.into_inner())
     };
 
-    let orig_etag = ETag::from(&orig_body_br[..]);
+    let orig_etag = ETag::from_buf(&orig_body_br[..]);
 
     let mut bufd = Service::new();
     bufd.set_encoding(Encoding::Br);
@@ -111,14 +102,8 @@ async fn br() {
         let res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
-        assert_eq!(
-            res.headers().get(CONTENT_ENCODING).unwrap().as_bytes(),
-            b"br"
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
+        assert_eq!(res.headers().get(CONTENT_ENCODING).unwrap(), "br");
     }
 
     // GET request (no accept-encoding header)
@@ -128,10 +113,7 @@ async fn br() {
         let mut res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
         assert_eq!(
             res.headers().get(CONTENT_ENCODING).unwrap().as_bytes(),
             b"br"
@@ -152,14 +134,8 @@ async fn br() {
         let mut res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
-        assert_eq!(
-            res.headers().get(CONTENT_ENCODING).unwrap().as_bytes(),
-            b"br"
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
+        assert_eq!(res.headers().get(CONTENT_ENCODING).unwrap(), "br");
         assert_eq!(
             res.body_mut().collect().await.unwrap().to_bytes(),
             orig_body_br
@@ -176,10 +152,7 @@ async fn br() {
         let mut res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
         assert!(res.headers().get(CONTENT_ENCODING).is_none());
         assert_eq!(
             res.body_mut().collect().await.unwrap().to_bytes(),
@@ -198,7 +171,7 @@ async fn gzip() {
         Bytes::from(encoder.finish().unwrap())
     };
 
-    let orig_etag = ETag::from(&orig_body_gzip[..]);
+    let orig_etag = ETag::from_buf(&orig_body_gzip[..]);
 
     let mut bufd = Service::new();
     bufd.set_encoding(Encoding::Gzip);
@@ -225,10 +198,7 @@ async fn gzip() {
         let res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
         assert_eq!(
             res.headers().get(CONTENT_ENCODING).unwrap().as_bytes(),
             b"gzip"
@@ -242,14 +212,8 @@ async fn gzip() {
         let mut res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
-        assert_eq!(
-            res.headers().get(CONTENT_ENCODING).unwrap().as_bytes(),
-            b"gzip"
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
+        assert_eq!(res.headers().get(CONTENT_ENCODING).unwrap(), "gzip");
         assert_eq!(
             res.body_mut().collect().await.unwrap().to_bytes(),
             orig_body_gzip
@@ -266,14 +230,8 @@ async fn gzip() {
         let mut res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
-        assert_eq!(
-            res.headers().get(CONTENT_ENCODING).unwrap().as_bytes(),
-            b"gzip"
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
+        assert_eq!(res.headers().get(CONTENT_ENCODING).unwrap(), "gzip");
         assert_eq!(
             res.body_mut().collect().await.unwrap().to_bytes(),
             orig_body_gzip
@@ -290,10 +248,7 @@ async fn gzip() {
         let mut res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
         assert!(res.headers().get(CONTENT_ENCODING).is_none());
         assert_eq!(
             res.body_mut().collect().await.unwrap().to_bytes(),
@@ -312,7 +267,7 @@ async fn deflate() {
         Bytes::from(encoder.finish().unwrap())
     };
 
-    let orig_etag = ETag::from(&orig_body_deflate[..]);
+    let orig_etag = ETag::from_buf(&orig_body_deflate[..]);
 
     let mut bufd = Service::new();
     bufd.set_encoding(Encoding::Deflate);
@@ -339,10 +294,7 @@ async fn deflate() {
         let res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
         assert_eq!(
             res.headers().get(CONTENT_ENCODING).unwrap().as_bytes(),
             b"deflate"
@@ -356,14 +308,8 @@ async fn deflate() {
         let mut res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
-        assert_eq!(
-            res.headers().get(CONTENT_ENCODING).unwrap().as_bytes(),
-            b"deflate"
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
+        assert_eq!(res.headers().get(CONTENT_ENCODING).unwrap(), "deflate");
         assert_eq!(
             res.body_mut().collect().await.unwrap().to_bytes(),
             orig_body_deflate
@@ -380,14 +326,8 @@ async fn deflate() {
         let mut res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
-        assert_eq!(
-            res.headers().get(CONTENT_ENCODING).unwrap().as_bytes(),
-            b"deflate"
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
+        assert_eq!(res.headers().get(CONTENT_ENCODING).unwrap(), "deflate");
         assert_eq!(
             res.body_mut().collect().await.unwrap().to_bytes(),
             orig_body_deflate
@@ -404,10 +344,7 @@ async fn deflate() {
         let mut res = bufd.call(req).await;
 
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(
-            res.headers().get(ETAG).unwrap().as_bytes(),
-            orig_etag.as_ref()
-        );
+        assert_eq!(res.headers().get(ETAG).unwrap(), orig_etag.0);
         assert!(res.headers().get(CONTENT_ENCODING).is_none());
         assert_eq!(
             res.body_mut().collect().await.unwrap().to_bytes(),
