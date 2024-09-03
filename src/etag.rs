@@ -10,7 +10,7 @@ impl ETag {
     }
 
     pub fn from_buf<T: Buf>(mut buf: T) -> Self {
-        let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
+        let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA256);
         while buf.has_remaining() {
             let chunk = buf.chunk();
             ctx.update(chunk);
@@ -20,7 +20,7 @@ impl ETag {
         Self::from_digest(digest)
     }
 
-    pub fn from_digest(digest: ring::digest::Digest) -> Self {
+    pub fn from_digest(digest: aws_lc_rs::digest::Digest) -> Self {
         use std::io::Write;
         const QUOTE: u8 = br#"""#[0];
         let digest = digest.as_ref();
