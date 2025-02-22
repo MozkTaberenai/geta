@@ -94,24 +94,27 @@ where
             let bytes = body.remaining();
             let encoding = self.encoding;
 
-            let body = if let Some(accept_encoding) = req.headers().get(ACCEPT_ENCODING) {
-                if encoding == Encoding::Identity || encoding.is_contained_in(accept_encoding) {
+            let body = match req.headers().get(ACCEPT_ENCODING) {
+                Some(accept_encoding) => {
+                    if encoding == Encoding::Identity || encoding.is_contained_in(accept_encoding) {
+                        info!(%encoding, %bytes, "serving body");
+                        Body::Buf { inner: Some(body) }
+                    } else {
+                        res.headers_mut().unwrap().remove(CONTENT_ENCODING);
+                        let spawn_decoder = match encoding {
+                            Encoding::Br => spawn_br_decoder,
+                            Encoding::Gzip => spawn_gzip_decoder,
+                            Encoding::Deflate => spawn_deflate_decoder,
+                            Encoding::Identity => unreachable!(),
+                        };
+                        warn!(%encoding, "decoder task is spawned");
+                        Body::from(spawn_decoder(body))
+                    }
+                }
+                _ => {
                     info!(%encoding, %bytes, "serving body");
                     Body::Buf { inner: Some(body) }
-                } else {
-                    res.headers_mut().unwrap().remove(CONTENT_ENCODING);
-                    let spawn_decoder = match encoding {
-                        Encoding::Br => spawn_br_decoder,
-                        Encoding::Gzip => spawn_gzip_decoder,
-                        Encoding::Deflate => spawn_deflate_decoder,
-                        Encoding::Identity => unreachable!(),
-                    };
-                    warn!(%encoding, "decoder task is spawned");
-                    Body::from(spawn_decoder(body))
                 }
-            } else {
-                info!(%encoding, %bytes, "serving body");
-                Body::Buf { inner: Some(body) }
             };
 
             res.body(body).unwrap()
